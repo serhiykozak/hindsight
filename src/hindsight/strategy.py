@@ -36,3 +36,65 @@ leveraging NumPy's powerful array operations.
 - Additional methods and attributes can be added to the subclass as needed to support more complex strategies.
 """
 
+from abc import ABC, abstractmethod
+from typing import Dict, Any
+
+class Strategy(ABC):
+    def __init__(self):
+        self.params: Dict[str, Any] = {}  # Strategy parameters
+
+    @abstractmethod
+    def initialize(self) -> None:
+        """
+        Initialize strategy-specific variables and parameters.
+        This method MUST be implemented by each concrete strategy.
+        """
+        pass
+
+    @abstractmethod
+    def next(self) -> None:
+        """
+        Core strategy logic. Called for each bar when the strategy is live.
+        This method MUST be implemented by each concrete strategy.
+        """
+        pass
+
+    def buy(self, asset: int, amount: float = None, price: float = None) -> None:
+        """
+        Place a buy order for a specific asset.
+        :param asset: ID of the asset to buy
+        :param amount: Amount to buy (optional)
+        :param price: Price to buy at (optional, None for market order)
+        """
+        # Implementation would be provided by the backtesting engine
+        pass
+
+    def sell(self, asset: int, amount: float = None, price: float = None) -> None:
+        """
+        Place a sell order for a specific asset.
+        :param asset: ID of the asset to sell
+        :param amount: Amount to sell (optional)
+        :param price: Price to sell at (optional, None for market order)
+        """
+        # Implementation would be provided by the backtesting engine
+        pass
+
+    def close(self, asset: int) -> None:
+        """
+        Close the entire position for a specific asset.
+        :param asset: ID of the asset to close the position for
+        """
+        # Implementation would be provided by the backtesting engine
+        pass
+
+    @abstractmethod
+    def warmup_period(self) -> int:
+        """
+        Define the warm-up period required before the strategy can trade.
+        This method MUST be implemented by each concrete strategy.
+        :return: Number of bars required for warm-up
+        """
+        pass
+
+# Note: Concrete strategy implementations should inherit from this Strategy class
+# and implement the required abstract methods (initialize, next, warmup_period).

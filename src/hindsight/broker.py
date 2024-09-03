@@ -15,3 +15,19 @@ processing of market data. Each time the simulation advances a day, the broker p
 orders and updates the portfolio accordingly. The class is designed to be flexible and efficient, allowing
 for different types of order execution strategies, such as market orders, limit orders, and stop-loss orders.
 """
+
+class Broker:
+
+    def __init__(self, params...):
+        # Implementation to initialize a broker object with some arguments
+        pass
+
+    def _execute(self, Order):
+        # Execute a order
+        pass
+
+    def get():
+        # returns some information
+        pass
+
+    ...
