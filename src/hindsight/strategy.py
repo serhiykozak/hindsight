@@ -40,6 +40,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any
 
 class Strategy(ABC):
+
     def __init__(self):
         self.params: Dict[str, Any] = {}  # Strategy parameters
 
