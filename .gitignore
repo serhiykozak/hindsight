@@ -1,2 +1,8 @@
-venv/*
-.parquet
+# Ignore the virtual environment
+venv/
+
+# Ignore all .parquet files
+*.parquet
+
+# Ignore all .csv files
+*.csv

@@ -32,7 +32,7 @@ class DataFeed:
     represents all assets and their features for a specific point in time.
     """
 
-    def __init__(self, data: np.ndarray):
+    def __init__(self, data: np.ndarray, feature_to_index, permno_to_index, date_to_index):
         """
         Initialize the DataFeed with the provided data.
 
@@ -54,6 +54,10 @@ class DataFeed:
         # Store the data and its dimensions
         self.data = data
         self.T, self.N, self.J = data.shape
+        
+        self.feature_to_index = feature_to_index 
+        self.permno_to_index = permno_to_index
+        self.date_to_index = date_to_index
 
     def get(self, t: int = 0, n: int = None, j: int = None) -> np.ndarray:
         """

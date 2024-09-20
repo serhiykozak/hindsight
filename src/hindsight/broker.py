@@ -29,5 +29,3 @@ class Broker:
     def get():
         # returns some information
         pass
-
-    ...
