@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 import math
 from .coords import Coordinates
 
-
 class Tensor(eqx.Module, ABC):
     """
     Abstract base class representing a generalized tensor structure.
@@ -39,6 +38,14 @@ class Tensor(eqx.Module, ABC):
     _feature_map: Dict[str, int] = eqx.field(init=False, repr=False)
 
     def __post_init__(self):
+        """
+        Validates the tensor's structure and initializes internal mappings.
+
+        Raises:
+            TypeError: If 'data' is not a JAX array.
+            ValueError: If the data dimensions do not match the number of dimension names.
+            ValueError: If tensor dimensions and coordinate keys do not match.
+        """
         # Ensure 'data' is a JAX array for compatibility
         if not isinstance(self.data, jnp.ndarray):
             raise TypeError("Data must be a JAX array (jnp.ndarray).")
@@ -153,11 +160,17 @@ class Tensor(eqx.Module, ABC):
                 f"Coordinates={self.Coordinates})")
         
     def _create_new_instance(self, data):
+        """
+        Creates a new instance of the same Tensor subclass with updated data.
+
+        Args:
+            data (jnp.ndarray): The data array for the new instance.
+
+        Returns:
+            Tensor: New instance of the Tensor subclass.
+        """
         return self.__class__(data=data, dimensions=self.dimensions,
                               feature_names=self.feature_names, Coordinates=self.Coordinates)
-
-    # Statistical methods can be added using decorators in tensor_ops.py
-    # For example, mean, std, etc.
 
     # Arithmetic operations
     def __sub__(self, other):
@@ -266,7 +279,7 @@ class Tensor(eqx.Module, ABC):
         blocks_results = blocks_results.reshape(-1, *other_dims)
     
         # Concatenate the results along the time dimension
-        # back-pad the results to the original time dimension
+        # Back-pad the results to the original time dimension
         final = jnp.concatenate((jnp.repeat(blocks_results[:1], window_size - 1, axis=0),
                                  blocks_results[:num_time_steps - window_size + 1]), axis=0)
 
@@ -416,7 +429,7 @@ class ReturnsTensor(Tensor):
         new_dimensions = self.dimensions
 
         # Coordinates may need to be updated to reflect the selected indices
-        sliced_Coordinates = self.Coordinates
+        sliced_Coordinates = self.Coordinates  # For simplicity, we're keeping Coordinates unchanged
 
         # Return a new ReturnsTensor instance with the sliced data and existing Coordinates
         return ReturnsTensor(
@@ -426,6 +439,15 @@ class ReturnsTensor(Tensor):
 
     # Override _create_new_instance
     def _create_new_instance(self, data):
+        """
+        Creates a new ReturnsTensor instance with the updated data.
+
+        Args:
+            data (jnp.ndarray): The data array for the new instance.
+
+        Returns:
+            ReturnsTensor: New instance of ReturnsTensor.
+        """
         return self.__class__(data=data, Coordinates=self.Coordinates)
 
 class CharacteristicsTensor(Tensor):
@@ -504,8 +526,7 @@ class CharacteristicsTensor(Tensor):
                 raise TypeError("Unsupported index type for feature dimension.")
 
         # Coordinates remain unchanged when slicing dimensions other than 'feature'
-        sliced_Coordinates = self.Coordinates
-        # If slicing 'feature', and features are updated, coordinates may remain the same or require adjustments
+        sliced_Coordinates = self.Coordinates  # For simplicity, keeping Coordinates unchanged
 
         # Return a new CharacteristicsTensor instance with sliced data and updated feature names
         return CharacteristicsTensor(
