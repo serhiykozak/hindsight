@@ -215,8 +215,7 @@ class Tensor(eqx.Module, ABC):
     def u_roll(
         self,
         window_size: int,
-        func: Callable[['Tensor'], 'Tensor'],
-        init_func: Callable[['Tensor', 'Tensor'], 'Tensor'] = None,
+        func: Callable[[int, Tuple[jnp.ndarray, Any, jnp.ndarray]], Tuple[jnp.ndarray, Any, jnp.ndarray]],
         overlap_factor: float = None
     ) -> 'Tensor':
         """
@@ -224,10 +223,9 @@ class Tensor(eqx.Module, ABC):
 
         Args:
             window_size (int): Size of the rolling window.
-            func (Callable[['Tensor'], 'Tensor']): Function to apply over the rolling window.
-                Should accept a Tensor block and return a Tensor.
-            init_func (Callable[['Tensor', 'Tensor'], 'Tensor'], optional): Function to initialize the rolling window.
-                Should accept a Tensor block and return a Tensor.
+            func (Callable[[int, Tuple[jnp.ndarray, Any, jnp.ndarray]], Tuple[jnp.ndarray, Any, jnp.ndarray]]):
+                Function to apply over the rolling window. Should accept an index and a state tuple,
+                and return (values, carry, block). This function is responsible for initialization when i == 0.
             overlap_factor (float, optional): Factor determining the overlap between blocks.
 
         Returns:
@@ -245,35 +243,27 @@ class Tensor(eqx.Module, ABC):
 
         # Function to apply over each block
         @eqx.filter_jit
-        def process_block(block: Tensor, func: Callable, init_func: Callable):
-            """
-            Processes a single block of data.
-
-            Args:
-                block (Tensor): The block of data to process.
-                func (Callable): The function to apply to the block.
-                init_func (Callable): The function to initialize the rolling window.
-            Returns:
-                Tensor: The result of the function applied to the block.
-            """
-            
+        def process_block(block: jnp.ndarray, func: Callable):
             t, n = block.shape
             
             values = jnp.zeros((t + window_size - 1, n), dtype=block.data.dtype)
             
-            state = func(block, values)
-            
-            # The initial value is the first value of the function applied to the block
-            initial_value, *_ = state
+            # Initialize state with the func (i == -1 case)
+            state = func(-1, (values, None, block))
             
             # Apply the step function iteratively
-            values, *_ = jax.lax.fori_loop(window_size, t, func, state)
+            def step_wrapper(i, state):
+                values, carry, block = state
+                new_values, new_carry, _ = func(i, state)
+                values = values.at[i - window_size + 1].set(new_values)
+                return (values, new_carry, block)
+            
+            values, *_ = jax.lax.fori_loop(window_size, t, step_wrapper, state)
             
             return values
-            
+        
         # Vectorize over blocks
-        blocks_results = jax.vmap(process_block, 
-                                  in_axes=(0, None, None))(blocks[block_indices], func, init_func)
+        blocks_results = jax.vmap(process_block, in_axes=(0, None))(blocks[block_indices], func)
         
         # Reshape the results to match the time dimension
         blocks_results = blocks_results.reshape(-1, *other_dims)
@@ -538,3 +528,4 @@ class CharacteristicsTensor(Tensor):
 
 
 from . import tensor_ops        
+
