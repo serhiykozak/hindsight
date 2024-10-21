@@ -1,5 +1,6 @@
 
 import numpy as np
+import pandas as pd
 from .tensor import Tensor, ReturnsTensor, CharacteristicsTensor 
 import jax
 import jax.numpy as jnp
@@ -83,4 +84,12 @@ class DataLoader(eqx.Module):
 
         # Return a ReturnsTensor instance
         return ReturnsTensor(data, coords)
+    
+    @eqx.filter_jit
+    def load_csv(self, filepath) -> jnp.ndarray:
+        return jnp.asarray(pd.read_csv(filepath).to_numpy())
+
+    @eqx.filter_jit
+    def load_parquet(self, filepath) -> jnp.ndarray:
+        return jnp.asarray(pd.read_parquet(filepath).to_numpy())
  
