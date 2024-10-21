@@ -1,3 +1,17 @@
+
+import numpy as np
+import pandas as pd
+from .tensor import Tensor, ReturnsTensor, CharacteristicsTensor 
+import jax
+import jax.numpy as jnp
+from typing import List, Tuple
+from functools import partial
+
+from .coords import Coordinates
+
+jax.config.update("jax_enable_x64", True)
+import equinox as eqx
+
 import numpy as np
 from .tensor import Tensor, ReturnsTensor, CharacteristicsTensor 
 import jax
@@ -65,3 +79,11 @@ class DataLoader(eqx.Module):
             feature_names=('return',),
             Coordinates=coords
         )
+    
+    @eqx.filter_jit
+    def load_csv(self, filepath) -> jnp.ndarray:
+        return jnp.asarray(pd.read_csv(filepath).to_numpy())
+
+    @eqx.filter_jit
+    def load_parquet(self, filepath) -> jnp.ndarray:
+        return jnp.asarray(pd.read_parquet(filepath).to_numpy())
