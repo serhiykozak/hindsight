@@ -19,7 +19,7 @@ def main():
     
     # Example of initializing Coordinates with numerical and categorical data
     coord_vars = {
-        'time': jnp.arange(100),                  # Numerical coordinate: time indices from 0 to 99
+        'time': np.arange(100),                  # Numerical coordinate: time indices from 0 to 99
         'asset': ['AAPL', 'GOOG', 'MSFT'],        # Categorical coordinate: asset names
         'feature': ['price', 'volume']            # Categorical coordinate: feature names
     }
@@ -38,7 +38,7 @@ def main():
     # Simulate some return data
     data = jax.random.normal(jax.random.PRNGKey(0), (100, 3, 1), dtype=jnp.float32)  # Shape: (time, asset, feature)
     coord_vars = {
-        'time': jnp.arange(100),
+        'time': np.arange(100),
         'asset': ['AAPL', 'GOOG', 'MSFT'],
         'feature': ['return']
     }
@@ -58,7 +58,7 @@ def main():
     data = jax.random.normal(jax.random.PRNGKey(0), (100, 3, 5), dtype=jnp.float32)  # Shape: (time, asset, feature)
     feature_names = ('PE_ratio', 'momentum', 'volatility', 'liquidity', 'size')
     coord_vars = {
-        'time': jnp.arange(100),
+        'time': np.arange(100),
         'asset': ['AAPL', 'GOOG', 'MSFT'],
         'feature': feature_names
     }
@@ -77,7 +77,7 @@ def main():
 
     # View the feature names after selection
     print(selected_characteristics.feature_names)  # Output: ('PE_ratio', 'volatility')
-
+    
     
 if __name__ == "__main__":
     main()

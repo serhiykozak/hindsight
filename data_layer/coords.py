@@ -1,8 +1,9 @@
 # data_layer/coords.py
 
-import jax.numpy as jnp
+import numpy as np
 import equinox as eqx
 from typing import Mapping, Any, Iterator
+import jax.numpy as jnp
 
 class Coordinates(eqx.Module):
     """
@@ -12,24 +13,30 @@ class Coordinates(eqx.Module):
     Attributes:
         variables (Mapping[str, Any]): 
             A mapping from dimension names to their coordinate data.
-            - Numerical data types are converted to JAX arrays for compatibility with JAX transformations.
+            - Numerical data types are converted to numpy arrays for compatibility with JAX transformations.
             - Non-numerical data types (e.g., strings) are stored as-is to maintain flexibility.
     """
-    variables: Mapping[str, Any] = eqx.field(default_factory=dict)
+    variables: Mapping[str, Any] = eqx.field(static=True)
     
     def __post_init__(self):
         """
         Processes the coordinate variables after initialization:
-        - Converts numerical data types to JAX arrays for optimized computations.
+        - Converts numerical data types to numpy arrays for optimized computations.
         - Keeps non-numerical data types unchanged to preserve information such as categorical labels.
         """
         processed_vars = {}
         for name, var in self.variables.items():
-            if self._is_numerical(var):
-                # Convert numerical data to JAX arrays
-                processed_vars[name] = jnp.array(var)
+            if isinstance(var, jnp.ndarray):
+                # Convert JAX arrays to numpy arrays
+                processed_vars[name] = np.array(var)
+            elif isinstance(var, np.ndarray):
+                # Keep numpy arrays as they are
+                processed_vars[name] = var
+            elif self._is_numerical(var):
+                # Convert numerical lists or tuples to numpy arrays
+                processed_vars[name] = np.array(var)
             else:
-                # Retain non-numerical data types (e.g., lists of strings)
+                # Keep non-numerical data types unchanged
                 processed_vars[name] = var
         # Update the 'variables' attribute with the processed variables
         object.__setattr__(self, 'variables', processed_vars)
@@ -48,8 +55,8 @@ class Coordinates(eqx.Module):
         if isinstance(var, (list, tuple)):
             # Check if all elements in the list or tuple are numerical types
             return all(isinstance(v, (int, float, complex)) for v in var)
-        # Check if the variable is a numerical JAX array or a single numerical value
-        return isinstance(var, (int, float, complex, jnp.ndarray))
+        # Check if the variable is a numerical numpy array or a single numerical value
+        return isinstance(var, (int, float, complex, np.ndarray))
     
     def __repr__(self) -> str:
         """
@@ -100,8 +107,8 @@ class Coordinates(eqx.Module):
         """
         hashable_items = []
         for name, var in self.variables.items():
-            if isinstance(var, jnp.ndarray):
-                # Convert JAX arrays to bytes for hashing
+            if isinstance(var, np.ndarray):
+                # Convert numpy arrays to bytes for hashing
                 hashable_items.append((name, var.tobytes()))
             else:
                 # Convert lists to tuples to make them hashable
@@ -129,9 +136,9 @@ class Coordinates(eqx.Module):
         for name in self.variables:
             var1 = self.variables[name]
             var2 = other.variables[name]
-            if isinstance(var1, jnp.ndarray) and isinstance(var2, jnp.ndarray):
-                # Use JAX's array_equal for numerical arrays
-                if not jnp.array_equal(var1, var2):
+            if isinstance(var1, np.ndarray) and isinstance(var2, np.ndarray):
+                # Use numpy's array_equal for numerical arrays
+                if not np.array_equal(var1, var2):
                     return False
             else:
                 # Direct comparison for non-numerical data types

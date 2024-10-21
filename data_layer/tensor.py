@@ -1,12 +1,14 @@
 # data_layer/tensor.py
 
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import equinox as eqx
 from typing import Tuple, List, Union, Dict, Callable, Any
 from abc import ABC, abstractmethod
 import math
 from .coords import Coordinates
+import numpy as np
 
 class Tensor(eqx.Module, ABC):
     """
@@ -28,14 +30,13 @@ class Tensor(eqx.Module, ABC):
     """
 
     data: jnp.ndarray
-    dimensions: Tuple[str, ...]
-    feature_names: Tuple[str, ...]
-    Coordinates: Coordinates
+    dimensions: Tuple[str, ...] = eqx.static_field()
+    feature_names: Tuple[str, ...] = eqx.static_field()
+    Coordinates: Coordinates = eqx.static_field()
 
     # Internal mappings for quick index retrieval by name
-    # Not exposed in representations to maintain encapsulation
-    _dimension_map: Dict[str, int] = eqx.field(init=False, repr=False)
-    _feature_map: Dict[str, int] = eqx.field(init=False, repr=False)
+    _dimension_map: Dict[str, int] = eqx.static_field()
+    _feature_map: Dict[str, int] = eqx.static_field()
 
     def __post_init__(self):
         """
@@ -209,9 +210,10 @@ class Tensor(eqx.Module, ABC):
         """
         Sets NaN values in the data array to zero.
         """
-        self.data = jnp.nan_to_num(self.data)
+        return jnp.nan_to_num(self.data)
 
     # u_roll method
+    @eqx.filter_jit
     def u_roll(
         self,
         window_size: int,
@@ -233,32 +235,35 @@ class Tensor(eqx.Module, ABC):
         """
         
         # Set NaN values to zero to avoid issues with NaN in the data
-        self._set_nan_to_zero()
+        data = self._set_nan_to_zero()
         
         # Prepare blocks of data for processing
         blocks, block_indices = self._prepare_blocks(window_size, overlap_factor)
         
-        other_dims = self.data.shape[1:]
-        num_time_steps = self.data.shape[0]
+        other_dims = data.shape[1:]
+        num_time_steps = data.shape[0]
 
         # Function to apply over each block
         @eqx.filter_jit
         def process_block(block: jnp.ndarray, func: Callable):
-            t, n = block.shape
             
-            values = jnp.zeros((t + window_size - 1, n), dtype=block.data.dtype)
+            # Get the shape of the block
+            t, n, j = block.shape
+                        
+            values = jnp.zeros((t + window_size - 1, n, j), dtype=jnp.float64)
             
-            # Initialize state with the func (i == -1 case)
-            state = func(-1, (values, None, block))
+            # Initialize carry with the func (i == -1 case)
+            values, carry, block = func(-1, (values, None, block), window_size)
             
             # Apply the step function iteratively
             def step_wrapper(i, state):
                 values, carry, block = state
-                new_values, new_carry, _ = func(i, state)
+                new_values, new_carry, _ = func(i, state, window_size)
                 values = values.at[i - window_size + 1].set(new_values)
                 return (values, new_carry, block)
             
-            values, *_ = jax.lax.fori_loop(window_size, t, step_wrapper, state)
+            # apply step_wrapper over the time dimension
+            values, *_ = jax.lax.fori_loop(window_size, t, step_wrapper, (values, carry, block))
             
             return values
         
@@ -277,6 +282,7 @@ class Tensor(eqx.Module, ABC):
         return self._create_new_instance(data=final)
 
     # Helper method to prepare blocks of data for u_roll
+    @eqx.filter_jit
     def _prepare_blocks(
         self,
         window_size: int,
@@ -345,7 +351,7 @@ class ReturnsTensor(Tensor):
             Coordinate variables associated with the tensor dimensions.
     """
     data: jnp.ndarray
-    Coordinates: Coordinates
+    Coordinates: Coordinates = eqx.field(static=True)
 
     # Fixed dimensions and feature names are set internally and are not exposed to the user
     dimensions: Tuple[str, ...] = eqx.field(default=('time', 'asset', 'feature'), init=False)
@@ -371,7 +377,9 @@ class ReturnsTensor(Tensor):
 
         # Initialize parent class mappings for dimensions and features
         super().__post_init__()
-
+        
+        
+    @eqx.filter_jit
     def select(self, dimension_name: str, index: Union[int, slice, List[int]]) -> 'ReturnsTensor':
         """
         Selects a slice of the ReturnsTensor along the specified dimension.
@@ -386,47 +394,47 @@ class ReturnsTensor(Tensor):
         Returns:
             ReturnsTensor:
                 A new ReturnsTensor instance with the selected data.
-
-        Raises:
-            IndexError: If attempting to slice the 'feature' dimension in an unsupported way.
-            ValueError: If slicing the 'feature' dimension improperly.
         """
-        # Create a slicer list initialized to select all elements in each dimension
-        slicer = [slice(None)] * self.data.ndim
-
-        # Retrieve the index of the dimension to slice
         dim_idx = self.get_dimension_index(dimension_name)
 
-        # Ensure that we use slicing that retains dimensions
+        # Create a list of slicers for each dimension
+        slicer = [slice(None)] * self.data.ndim
+
+        # Handle the index based on its type
         if isinstance(index, int):
             # Convert integer index to a slice that retains the dimension
-            index = slice(index, index+1)
+            index = slice(index, index + 1)
+            slicer[dim_idx] = index
+            sliced_data = self.data[tuple(slicer)]
+        elif isinstance(index, slice):
+            slicer[dim_idx] = index
+            sliced_data = self.data[tuple(slicer)]
         elif isinstance(index, list):
-            if len(index) == 1:
-                # Convert single-element list to slice
-                index = slice(index[0], index[0]+1)
-            else:
-                # Convert list to an array for advanced indexing
-                index = jnp.array(index)
+            index_array = jnp.array(index)
+            sliced_data = jnp.take(self.data, index_array, axis=dim_idx)
+        else:
+            raise TypeError("Unsupported index type for dimension.")
 
-        # Update the slicer for the specified dimension with the provided index
-        slicer[dim_idx] = index
+        # Update Coordinates
+        new_variables = self.Coordinates.variables.copy()
+        if dimension_name in new_variables:
+            coord_var = new_variables[dimension_name]
+            if isinstance(index, int):
+                new_variables[dimension_name] = coord_var[index:index+1]
+            elif isinstance(index, slice):
+                new_variables[dimension_name] = coord_var[index]
+            elif isinstance(index, list):
+                index_array = jnp.array(index)
+                new_variables[dimension_name] = jnp.take(coord_var, index_array)
+        new_Coordinates = Coordinates(variables=new_variables)
 
-        # Perform the slicing operation on the data array
-        sliced_data = self.data[tuple(slicer)]
-
-        # Dimensions remain the same
-        new_dimensions = self.dimensions
-
-        # Coordinates may need to be updated to reflect the selected indices
-        sliced_Coordinates = self.Coordinates  # For simplicity, we're keeping Coordinates unchanged
-
-        # Return a new ReturnsTensor instance with the sliced data and existing Coordinates
+        # Return new ReturnsTensor instance
         return ReturnsTensor(
             data=sliced_data,
-            Coordinates=sliced_Coordinates
+            Coordinates=new_Coordinates
         )
 
+    
     # Override _create_new_instance
     def _create_new_instance(self, data):
         """
@@ -457,75 +465,131 @@ class CharacteristicsTensor(Tensor):
             Coordinate variables associated with the tensor dimensions.
     """
     data: jnp.ndarray
-    dimensions: Tuple[str, ...]
-    feature_names: Tuple[str, ...]
-    Coordinates: Coordinates
+    dimensions: Tuple[str, ...] = eqx.field(static=True)
+    feature_names: Tuple[str, ...] = eqx.field(static=True)
+    Coordinates: Coordinates = eqx.field(static=True)
+
+    _dimension_map: Dict[str, int] = eqx.field(init=False, static=True)
+    _feature_map: Dict[str, int] = eqx.field(init=False, static=True)
 
     def __post_init__(self):
-        """
-        Initializes the CharacteristicsTensor by calling the parent __post_init__ method.
-        """
-        super().__post_init__()
+        if not isinstance(self.data, jnp.ndarray):
+            raise TypeError("Data must be a JAX array (jnp.ndarray).")
 
-    def select(self, dimension_name: str, index: Union[int, slice, List[int]]) -> 'CharacteristicsTensor':
-        """
-        Selects a slice of the CharacteristicsTensor along the specified dimension.
-        Returns a new CharacteristicsTensor instance with the sliced data and updated feature names if necessary.
+        if self.data.ndim != len(self.dimensions):
+            raise ValueError(f"Data array has {self.data.ndim} dimensions, but {len(self.dimensions)} dimension names were provided.")
 
-        Args:
-            dimension_name (str):
-                Name of the dimension to slice (e.g., 'time', 'asset', 'feature').
-            index (Union[int, slice, List[int]]):
-                Index or slice to select along the specified dimension.
+        dimensions_set = set(self.dimensions)
+        coordinates_set = set(self.Coordinates.variables.keys())
 
-        Returns:
-            CharacteristicsTensor:
-                A new CharacteristicsTensor instance with the selected data and updated feature names.
+        if dimensions_set != coordinates_set:
+            missing_in_coords = dimensions_set - coordinates_set
+            missing_in_dims = coordinates_set - dimensions_set
+            error_message = "Tensor dimensions and coordinate keys do not match.\n"
+            if missing_in_coords:
+                error_message += f"Dimensions missing in Coordinates: {missing_in_coords}\n"
+            if missing_in_dims:
+                error_message += f"Coordinates missing in dimensions: {missing_in_dims}\n"
+            error_message += f"Tensor dimensions: {self.dimensions}\n"
+            error_message += f"Coordinate keys: {list(self.Coordinates.variables.keys())}"
+            raise ValueError(error_message)
 
-        Raises:
-            TypeError: If an unsupported index type is used for the 'feature' dimension.
-        """
-        # Create a slicer list initialized to select all elements in each dimension
-        slicer = [slice(None)] * self.data.ndim
+        object.__setattr__(self, '_dimension_map', {dim: idx for idx, dim in enumerate(self.dimensions)})
+        object.__setattr__(self, '_feature_map', {feature: idx for idx, feature in enumerate(self.feature_names)})
 
-        # Retrieve the index of the dimension to slice
+    @eqx.filter_jit
+    def select(self, dimension_name: str, index: Union[int, slice, List[int], str, List[str]]) -> 'CharacteristicsTensor':
         dim_idx = self.get_dimension_index(dimension_name)
 
-        # Update the slicer for the specified dimension with the provided index
-        slicer[dim_idx] = index
+        # Create a list of slicers for each dimension
+        slicer = [slice(None)] * self.data.ndim
 
-        # Perform the slicing operation on the data array
-        sliced_data = self.data[tuple(slicer)]
+        # Handle the index based on its type
+        if dimension_name == 'feature':
+            # Handle feature names
+            if isinstance(index, str):
+                # Get the index of the feature name
+                index_num = self.get_feature_index(index)
+                index = slice(index_num, index_num + 1)
+                slicer[dim_idx] = index
+                sliced_data = self.data[tuple(slicer)]
+                new_feature_names = (index,)
+            elif isinstance(index, list) and all(isinstance(i, str) for i in index):
+                # Get indices for each feature name
+                indices = [self.get_feature_index(name) for name in index]
+                index_array = jnp.array(indices)
+                sliced_data = jnp.take(self.data, index_array, axis=dim_idx)
+                new_feature_names = tuple(index)
+            else:
+                # Handle indices as before
+                pass  # We'll handle numeric indices below
+        else:
+            # For other dimensions, feature names are unchanged
+            new_feature_names = self.feature_names
 
-        # Initialize new feature names as the current feature names
-        new_feature_names = self.feature_names
+        # Now handle numeric indices or slices
+        if isinstance(index, int):
+            index = slice(index, index + 1)
+            slicer[dim_idx] = index
+            sliced_data = self.data[tuple(slicer)]
+        elif isinstance(index, slice):
+            slicer[dim_idx] = index
+            sliced_data = self.data[tuple(slicer)]
+        elif isinstance(index, list):
+            # Check if the list contains integers
+            if all(isinstance(i, int) for i in index):
+                index_array = jnp.array(index)
+                sliced_data = jnp.take(self.data, index_array, axis=dim_idx)
+            else:
+                raise TypeError("Unsupported index type in list for dimension.")
+        else:
+            raise TypeError("Unsupported index type for dimension.")
 
-        # If slicing the 'feature' dimension, update the feature names accordingly
+        # Update Coordinates
+        new_variables = self.Coordinates.variables.copy()
+        
+        if dimension_name in new_variables:
+            coord_var = new_variables[dimension_name]
+            if isinstance(index, int):
+                new_variables[dimension_name] = coord_var[index:index+1]
+            elif isinstance(index, slice):
+                new_variables[dimension_name] = coord_var[index]
+            elif isinstance(index, list):
+                if all(isinstance(i, int) for i in index):
+                    # Use numpy instead of JAX for indexing
+                    new_variables[dimension_name] = np.take(coord_var, index)
+                elif all(isinstance(i, str) for i in index):
+                    # Already handled when slicing data
+                    new_variables[dimension_name] = np.array(index)
+                else:
+                    raise TypeError("Unsupported index type in list for Coordinates.")
+                
+        # Update feature names if slicing along 'feature' dimension
         if dimension_name == 'feature':
             if isinstance(index, int):
-                # Selecting a single feature by index
                 new_feature_names = (self.feature_names[index],)
             elif isinstance(index, slice):
-                # Selecting a range of features
                 new_feature_names = self.feature_names[index]
             elif isinstance(index, list):
-                # Selecting multiple specific features by index
-                new_feature_names = tuple(self.feature_names[i] for i in index)
-            else:
-                # Unsupported index type for 'feature' dimension
-                raise TypeError("Unsupported index type for feature dimension.")
+                if all(isinstance(i, int) for i in index):
+                    new_feature_names = tuple(self.feature_names[i] for i in index)
+                else:
+                    # Already set when index is list of strings
+                    pass
+        else:
+            new_feature_names = self.feature_names
 
-        # Coordinates remain unchanged when slicing dimensions other than 'feature'
-        sliced_Coordinates = self.Coordinates  # For simplicity, keeping Coordinates unchanged
-
-        # Return a new CharacteristicsTensor instance with sliced data and updated feature names
+        # Return new CharacteristicsTensor instance
         return CharacteristicsTensor(
             data=sliced_data,
             dimensions=self.dimensions,
             feature_names=new_feature_names,
-            Coordinates=sliced_Coordinates
+            Coordinates=Coordinates(variables=new_variables)
         )
 
 
+
 from . import tensor_ops        
+
+
 

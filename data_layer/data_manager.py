@@ -1,16 +1,3 @@
-
-import numpy as np
-from .tensor import Tensor, ReturnsTensor, CharacteristicsTensor 
-import jax
-import jax.numpy as jnp
-from typing import List, Tuple
-from functools import partial
-
-from .coords import Coordinates
-
-jax.config.update("jax_enable_x64", True)
-import equinox as eqx
-
 import numpy as np
 from .tensor import Tensor, ReturnsTensor, CharacteristicsTensor 
 import jax
@@ -61,26 +48,20 @@ class DataLoader(eqx.Module):
         """
         return jax.random.normal(jax.random.PRNGKey(0), shape, dtype=jnp.float32)
 
-    def simulate_load_returns(self) -> ReturnsTensor:
-        """
-        Simulates loading returns data from multiple sources.
-
-        Returns:
-            ReturnsTensor: A ReturnsTensor containing the simulated data.
-        """
-        # Simulate data generation
+    def simulate_load_returns(self) -> CharacteristicsTensor:
         data = self._generate_random_data((10_000, 3, 1))  # JAX array
 
-        # Define coordinate variables for the tensor
         coord_vars = {
-            'time': jnp.arange(10_000),                  # Numerical coordinate: time steps from 0 to 9999
-            'asset': ['AAPL', 'GOOG', 'MSFT'],           # Categorical coordinate: asset names
-            'feature': ['return']                        # Categorical coordinate: asset features
+            'time': np.arange(10_000),  # Use numpy array instead of JAX array
+            'asset': ['AAPL', 'GOOG', 'MSFT'],
+            'feature': ['return']
         }
 
-        # Initialize the Coordinates object with the defined coordinate variables
         coords = Coordinates(coord_vars)
 
-        # Return a ReturnsTensor instance
-        return ReturnsTensor(data, coords)
- 
+        return CharacteristicsTensor(
+            data=data,
+            dimensions=('time', 'asset', 'feature'),
+            feature_names=('return',),
+            Coordinates=coords
+        )
