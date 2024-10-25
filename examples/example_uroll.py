@@ -1,8 +1,7 @@
 # hindsight/example_uroll.py
 
 # Import necessary modules and classes
-from data_layer.tensor import CharacteristicsTensor
-from data_layer.coords import Coordinates
+from src import Tensor, CharacteristicsTensor, Coordinates, DataLoader
 import jax.numpy as jnp
 import jax
 import numpy as np
