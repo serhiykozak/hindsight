@@ -197,13 +197,7 @@ def main():
     
     def benchmark_u_roll():
         # Compute the EMA using the u_roll method
-        data = jax.device_get(close_tensor.u_roll(10, ema))
-        
-        # Create a new CharacteristicsTensor with the computed data
-        return CharacteristicsTensor(data=np.array(data),
-                                     dimensions=('time', 'asset', 'feature'),
-                                     feature_names=[name + '_ema' for name in feature_names],
-                                     Coordinates=close_tensor.Coordinates)
+        return close_tensor.u_roll(10, ema)
     
     def benchmark_pandas():
         df = pd.DataFrame(close_tensor.data.squeeze())
@@ -218,14 +212,13 @@ def main():
     print(f"pandas method: {pandas_time:.4f} seconds")
     
     # Compute EMA using u_roll for further analysis
-    compute_ema = benchmark_u_roll()
+    compute_ema = jax.device_get(benchmark_u_roll())
     
     print("\nShape of computed EMA tensor:", compute_ema.data.shape)
-    print("Feature names of computed EMA tensor:", compute_ema.feature_names)
     
     # Verify results by comparing with pandas implementation
     pandas_ema = benchmark_pandas()
-    u_roll_ema = compute_ema.data.squeeze()
+    u_roll_ema = compute_ema.squeeze()
     
     print("\nVerification:")
     print("Max absolute difference:", jnp.max(jnp.abs(pandas_ema - u_roll_ema)))
