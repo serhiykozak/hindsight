@@ -1,4 +1,4 @@
-# hindsight/main.py
+# hindsight/example_uroll.py
 
 # Import necessary modules and classes
 from data_layer.tensor import CharacteristicsTensor
@@ -8,7 +8,9 @@ import jax
 import numpy as np
 import pandas as pd
 import timeit
+import random
 from functools import partial
+import matplotlib.pyplot as plt
 
 # This example demonstrates the use of JAX for efficient numerical computations,
 # particularly in the context of financial data processing.
@@ -16,6 +18,52 @@ from functools import partial
 # JAX is a library for high-performance numerical computing, especially suited
 # for machine learning tasks. It provides automatic differentiation and can
 # leverage GPU/TPU acceleration.
+
+def plot_random_assets(characteristics_tensor, num_assets=5, save_path='random_assets_plot.png'):
+    """
+    Plot time series data for random assets from the characteristics tensor.
+    
+    Args:
+    characteristics_tensor: CharacteristicsTensor object containing the data
+    num_assets (int): Number of random assets to plot (default 5)
+    save_path (str): Path where to save the plot
+    """
+    # Get total number of assets
+    total_assets = characteristics_tensor.data.shape[1]
+    
+    # Randomly select assets
+    random_indices = random.sample(range(total_assets), num_assets)
+    
+    # Create figure and axis
+    plt.figure(figsize=(15, 8))
+    
+    # Plot each feature for each selected asset
+    colors = plt.cm.Set3(np.linspace(0, 1, len(characteristics_tensor.feature_names)))
+    
+    for i, asset_idx in enumerate(random_indices):
+        for j, feature in enumerate(characteristics_tensor.feature_names):
+            feature_data = characteristics_tensor.select('feature', feature).data[:, asset_idx]
+            
+            plt.plot(characteristics_tensor.Coordinates.variables['time'], 
+                    feature_data,
+                    label=f'Asset {asset_idx} - {feature}',
+                    color=colors[j],
+                    alpha=0.6,
+                    linestyle=['-', '--', ':', '-.', '-'][i])
+    
+    plt.title('Time Series Data for 5 Random Assets')
+    plt.xlabel('Time Steps')
+    plt.ylabel('Value')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Save the plot
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"\nPlot saved as {save_path}")
+    print(f"Plotted assets with indices: {random_indices}")
 
 def generate_sine_wave(time_steps, frequency, amplitude=1.0):
     """
@@ -72,11 +120,14 @@ def main():
     # This is a custom tensor class defined in data_layer/tensor.py
     # It's designed to handle multi-dimensional financial data efficiently
     characteristics_tensor = CharacteristicsTensor(
-        data=data,
+        data=np.array(data),
         dimensions=('time', 'asset', 'feature'),
         feature_names=feature_names,
         Coordinates=coords
     )
+
+    print("\nGenerating plot of random assets...")
+    plot_random_assets(characteristics_tensor)
 
     # Demonstrate slicing operations on the tensor
     # Select time steps 0 to 9 (10 steps in total)
@@ -103,7 +154,7 @@ def main():
     # Define a function to compute Exponential Moving Average (EMA)
     # This function will be used with the u_roll method for efficient computation
     @partial(jax.jit, static_argnames=['window_size'])
-    def ema(i: int, state, window_size: int):
+    def ema(i: int, carry, block: jnp.ndarray, window_size: int):
         """
         Compute the Exponential Moving Average (EMA) for a given window.
         
@@ -119,19 +170,16 @@ def main():
         Returns:
         tuple: Updated state (new EMA value, carry, and data block)
         """
-        curr_values, carry, block = state
         
         # Initialize the first value
-        if (carry == None):
+        if carry is None:
             # Compute the sum of the first window
             current_window_sum = block[:window_size].reshape(-1, 
                                                              block.shape[1], 
                                                              block.shape[2]).sum(axis=0)
+        
             
-            # Set the first EMA value as the average of the first window
-            values = curr_values.at[0].set(current_window_sum * (1/window_size))
-            
-            return (values, current_window_sum * (1/window_size), block)
+            return (current_window_sum * (1/window_size), current_window_sum * (1/window_size))
         
         # Get the current price
         current_price = block[i]
@@ -139,15 +187,24 @@ def main():
         # Compute the new EMA
         # EMA = α * current_price + (1 - α) * previous_EMA
         # where α = 1 / (window_size)
-        new_ema = (1 / (window_size)) * current_price + (1 - (1 / (window_size))) * carry
+        alpha = 1 / window_size
         
-        return (new_ema, carry, block)
+        new_ema = alpha * current_price + (1 - alpha) * carry
+        
+        return (new_ema, new_ema)
         
     # Benchmark comparison between custom u_roll method and pandas
     # This demonstrates the performance benefits of our custom implementation
     
     def benchmark_u_roll():
-        return close_tensor.u_roll(10, ema)
+        # Compute the EMA using the u_roll method
+        data = jax.device_get(close_tensor.u_roll(10, ema))
+        
+        # Create a new CharacteristicsTensor with the computed data
+        return CharacteristicsTensor(data=np.array(data),
+                                     dimensions=('time', 'asset', 'feature'),
+                                     feature_names=[name + '_ema' for name in feature_names],
+                                     Coordinates=close_tensor.Coordinates)
     
     def benchmark_pandas():
         df = pd.DataFrame(close_tensor.data.squeeze())
@@ -162,7 +219,7 @@ def main():
     print(f"pandas method: {pandas_time:.4f} seconds")
     
     # Compute EMA using u_roll for further analysis
-    compute_ema = close_tensor.u_roll(10, ema)
+    compute_ema = benchmark_u_roll()
     
     print("\nShape of computed EMA tensor:", compute_ema.data.shape)
     print("Feature names of computed EMA tensor:", compute_ema.feature_names)

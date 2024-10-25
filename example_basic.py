@@ -1,4 +1,4 @@
-# hindsight/main.py
+# hindsight/example_basic.py
 
 # Importing necessary classes from the data_layer and coords modules
 from data_layer.tensor import Tensor, ReturnsTensor, CharacteristicsTensor
@@ -8,7 +8,6 @@ from data_layer.data_manager import DataLoader
 # Importing JAX's NumPy module for numerical operations
 import jax.numpy as jnp
 import jax
-
 
 def main():
     """
