@@ -17,15 +17,16 @@ def main():
     """
     
     data_loader = DataLoader()
-    c_tensor, r_tensor = data_loader.load_cache(freq='D')
-        
+    c_tensor, r_tensor = data_loader.load_cache(freq='D') # SK: see how this is implemented in qlib. I think it's better to have DataLoader handle simple tasks to load a specific dataset (CRSP or Compustat). 
+                                                          #     Any merging or computation of derived characteristics should be handled in DataHandlers. If I am not mistaken, this is what qlib does -- they stack
+                                                          #     DataLoaders and DataHandlers in config files to load and process data. 
     print("Is Apple (14593) in the tensor?", 14593 in c_tensor.Coordinates.variables['asset'])
     
     # Get the assets
-    assets = jnp.array(c_tensor.Coordinates.variables['asset'])
+    assets = jnp.array(c_tensor.Coordinates.variables['asset']) 
     
     # Find the index of the asset we are searching for
-    asset_idx = jnp.where(assets == 14593)[0][0]
+    asset_idx = jnp.where(assets == 14593)[0][0] # SK: can we have a possibility to define a "coordinate mapper" which would allow us to access stocks via an alternative set of labels (e.g. tickers)?
         
     # Get the asset 14593
     asset_14593 = c_tensor.select('asset', int(asset_idx))
